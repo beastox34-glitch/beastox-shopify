@@ -1,0 +1,254 @@
+/*
+BEASTOX – SHOPIFY + BEAST AI (COPY–PASTE READY)
+================================================
+This setup connects:
+• Shopify Storefront (real products, cart, checkout)
+• Beast AI (OpenAI backend)
+• GitHub deploy friendly
+
+ARCHITECTURE
+------------
+Frontend (HTML/JS)  →  Backend (Node.js)
+                     →  Shopify Storefront API
+                     →  OpenAI API (Beast AI)
+
+You can deploy backend on Render/Vercel and frontend on GitHub Pages.
+*/
+
+// ================================
+// 1️⃣ FILE STRUCTURE (GITHUB)
+// ================================
+/*
+beastox-shopify-ai/
+│
+├── frontend/
+│   ├── index.html
+│   └── script.js
+│
+├── backend/
+│   ├── server.js
+│   ├── package.json
+│   └── .env
+│
+└── README.md
+*/
+
+// ================================
+// 2️⃣ FRONTEND – index.html
+// ================================
+
+const frontend_index_html = `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>BEASTOX | AI-Powered Fitness Store</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <style>
+    body{margin:0;font-family:Arial;background:#0b0b0b;color:#fff}
+    header{padding:16px;background:#ff7a00;color:#000;font-weight:800}
+    .products{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:16px;padding:20px}
+    .card{background:#121212;padding:16px;border-radius:14px}
+    button{background:#ff7a00;border:none;padding:10px 14px;border-radius:20px;font-weight:700;cursor:pointer}
+    .chat{position:fixed;right:20px;bottom:20px;width:340px;background:#111;border-radius:16px;overflow:hidden}
+    .chat-head{background:#ff7a00;color:#000;padding:12px;font-weight:800}
+    .chat-body{height:260px;overflow:auto;padding:10px;font-size:14px}
+    .chat-foot{display:flex;padding:10px;border-top:1px solid #222}
+    input{flex:1;border-radius:20px;border:none;padding:10px}
+  </style>
+</head>
+<body>
+<header>🐂 BEASTOX – Shop Smart. Train Hard.</header>
+
+<section class="products" id="products"></section>
+
+<!-- Beast AI Chat -->
+<div class="chat">
+  <div class="chat-head">Ask Beast AI</div>
+  <div class="chat-body" id="chat"></div>
+  <div class="chat-foot">
+    <input id="q" placeholder="Ask about products, meals, calories…" />
+    <button onclick="askAI()">Send</button>
+  </div>
+</div>
+
+<script src="script.js"></script>
+</body>
+</html>`;
+
+// ================================
+// 3️⃣ FRONTEND – script.js
+// ================================
+
+const frontend_script_js = `const productBox = document.getElementById('products');
+const chat = document.getElementById('chat');
+
+// Load products from backend (Shopify)
+fetch('/products')
+  .then(res => res.json())
+  .then(data => {
+    data.forEach(p => {
+      const d = document.createElement('div');
+      d.className = 'card';
+      d.innerHTML = `
+        <h3>${p.title}</h3>
+        <p>${p.description}</p>
+        <b>₹${p.price}</b><br><br>
+        <a href="${p.checkout}" target="_blank">
+          <button>Buy Now</button>
+        </a>`;
+      productBox.appendChild(d);
+    });
+  });
+
+function addMsg(text, me=false){
+  const d = document.createElement('div');
+  d.style.margin='6px 0';
+  d.innerHTML = `<b>${me?'You':'Beast AI'}:</b> ${text}`;
+  chat.appendChild(d);
+  chat.scrollTop = chat.scrollHeight;
+}
+
+async function askAI(){
+  const input = document.getElementById('q');
+  const msg = input.value.trim();
+  if(!msg) return;
+  addMsg(msg,true);
+  input.value='';
+
+  const res = await fetch('/ask-beast-ai',{
+    method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({message:msg})
+  });
+  const data = await res.json();
+  addMsg(data.reply,false);
+}`;
+
+// ================================
+// 4️⃣ BACKEND – server.js
+// ================================
+
+const backend_server_js = `import express from 'express';
+import cors from 'cors';
+import dotenv from 'dotenv';
+import fetch from 'node-fetch';
+import OpenAI from 'openai';
+
+dotenv.config();
+const app = express();
+app.use(cors());
+app.use(express.json());
+
+const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+
+// ---- SHOPIFY CONFIG ----
+const SHOP = process.env.SHOPIFY_STORE;
+const TOKEN = process.env.SHOPIFY_STOREFRONT_TOKEN;
+
+// Fetch products from Shopify
+app.get('/products', async (req,res)=>{
+  const query = `{
+    products(first:10){
+      edges{
+        node{
+          title
+          description
+          variants(first:1){edges{node{price{amount}}}}
+          onlineStoreUrl
+        }
+      }
+    }
+  }`;
+
+  const r = await fetch(`https://${SHOP}/api/2023-10/graphql.json`,{
+    method:'POST',
+    headers:{
+      'Content-Type':'application/json',
+      'X-Shopify-Storefront-Access-Token':TOKEN
+    },
+    body:JSON.stringify({query})
+  });
+
+  const j = await r.json();
+  const products = j.data.products.edges.map(e=>({
+    title:e.node.title,
+    description:e.node.description,
+    price:e.node.variants.edges[0].node.price.amount,
+    checkout:e.node.onlineStoreUrl
+  }));
+
+  res.json(products);
+});
+
+// ---- BEAST AI ----
+app.post('/ask-beast-ai', async (req,res)=>{
+  const user = req.body.message;
+
+  const completion = await openai.chat.completions.create({
+    model:'gpt-4.1-mini',
+    messages:[
+      {role:'system',content:`You are Beast AI, official AI coach of BEASTOX.
+      - Help with calories & meal plans
+      - Recommend BeastOx products from Shopify
+      - Encourage checkout naturally
+      - Never make medical claims`},
+      {role:'user',content:user}
+    ]
+  });
+
+  res.json({ reply: completion.choices[0].message.content });
+});
+
+app.listen(3000,()=>console.log('🔥 BeastOx Shopify + AI running'));`;
+
+// ================================
+// 5️⃣ package.json
+// ================================
+
+const backend_package_json = `{
+  "name": "beastox-shopify-ai",
+  "type": "module",
+  "scripts": { "start": "node server.js" },
+  "dependencies": {
+    "cors": "^2.8.5",
+    "dotenv": "^16.3.1",
+    "express": "^4.19.2",
+    "node-fetch": "^3.3.2",
+    "openai": "^4.30.0"
+  }
+}`;
+
+// ================================
+// 6️⃣ .env (DO NOT UPLOAD)
+// ================================
+
+const env_example = `OPENAI_API_KEY=sk-xxxx
+SHOPIFY_STORE=beastox.myshopify.com
+SHOPIFY_STOREFRONT_TOKEN=shpat_xxxx`;
+
+// ================================
+// 7️⃣ README.md
+// ================================
+
+const readme = `# 🐂 BEASTOX – Shopify + Beast AI
+
+This project connects:
+• Shopify Storefront (real products & checkout)
+• Beast AI (OpenAI powered)
+• GitHub deployment
+
+## Setup
+1. Clone repo
+2. npm install
+3. Add .env values
+4. npm start
+
+## Result
+Customers:
+• Browse real Shopify products
+• Ask Beast AI for guidance
+• Buy instantly via Shopify checkout
+
+Built for premium conversion.`;
+
+// END OF REPO
